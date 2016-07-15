@@ -1,14 +1,17 @@
-function CheckDbdFlags(dbd,field,test)
+function CheckDbdFlags(dbd,field,test,xseconly)
 
 % create plots to check flags for QARTOD tests
-% 
+%
 % inputs:
 %     dbd: single dbd instance/segment
 %     field: string indicating the sensor being QC-tested
 %     test: string indicating QARTOD test to view flags for
 %         (options: 'gross range','climatological','spike',
 %         'rate of change','flat line')
-
+%     xseconly: logical, true to plot only the cross-section figure
+%         with flagged data points marked and prevent plotting of scatter
+%         plots or profile plots (optional; default: false)
+%
 % each test will show a cross-section plot of the data from sensor 'field',
 % with x's over non-passing data points indicating 'not
 % evaluated', 'suspect', or 'failed' flags. additional plots specific to
@@ -39,7 +42,15 @@ function CheckDbdFlags(dbd,field,test)
 %         subplots for:
 %             - depth vs. field
 %             - time vs. field
-%         
+%
+
+if(nargin<3)
+    fprintf(2,'at least 3 arguments (dgroup, field, and test) must be provided\n')
+    return;
+end
+if(nargin<4)
+    xseconly=false;
+end
 
 test=lower(test);
 test(test==' ')=[];
@@ -116,101 +127,67 @@ title([field ': ' test],'interpreter','none')
 set(gcf,'windowstyle','docked')
 
 
-
-switch test
-    case 'gross_range'
-        figure
-        hold on
-        s=[scatter([filldot;data(ind1,1)],[filldot;data(ind1,3)],'b','marker','.'),...
-            scatter([filldot;data(ind2,1)],[filldot;data(ind2,3)],'k.'),...
-            scatter([filldot;data(ind3,1)],[filldot;data(ind3,3)],'m.'),...
-            scatter([filldot;data(ind4,1)],[filldot;data(ind4,3)],'r.'),...
-            plot([min(data(:,1)) max(data(:,1))],...
-            dbd.scratch.thresholds.(field).(test).suspect(1)*[1 1],'m'),...
-            plot([min(data(:,1)) max(data(:,1))],...
-            dbd.scratch.thresholds.(field).(test).fail(1)*[1 1],'r')];
-        plot([min(data(:,1)) max(data(:,1))],...
-            dbd.scratch.thresholds.(field).(test).fail(2)*[1 1],'r');
-        plot([min(data(:,1)) max(data(:,1))],...
-            dbd.scratch.thresholds.(field).(test).suspect(2)*[1 1],'m');
-        xlabel('Time')
-        xlim([min(data(:,1)) max(data(:,1))]+range(data(:,1))/10*[-1 1])
-        ylim([min([data(:,3);dbd.scratch.thresholds.(field).(test).fail']) max([data(:,3);dbd.scratch.thresholds.(field).(test).fail'])]+range(data(:,3))/10*[-1 1])
-        datetick('x','HH:MM','keepticks','keeplimits')
-        ylabel(field,'interpreter','none')
-        title('Gross Range Test')
-        legend(s,{'Pass','Not Evaluated','Suspect','Fail','Suspect Threshold','Fail Threshold'})
-        set(gcf,'windowstyle','docked')
-    case 'climatological'
-        figure
-        hold on
-        s=[scatter([filldot;data(ind1,1)],[filldot;data(ind1,3)],'b','marker','.'),...
-            scatter([filldot;data(ind2,1)],[filldot;data(ind2,3)],'k.'),...
-            scatter([filldot;data(ind3,1)],[filldot;data(ind3,3)],'m.'),...
-            plot([min(data(:,1)) max(data(:,1))],...
-            dbd.scratch.thresholds.(field).(test).suspect(1)*[1 1],'m')];
-        plot([min(data(:,1)) max(data(:,1))],...
-            dbd.scratch.thresholds.(field).(test).suspect(2)*[1 1],'m');
-        xlabel('Time')
-        xlim([min(data(:,1)) max(data(:,1))]+range(data(:,1))/10*[-1 1])
-        ylim([min([data(:,3);dbd.scratch.thresholds.(field).(test).suspect']) max([data(:,3);dbd.scratch.thresholds.(field).(test).suspect'])]+range(data(:,3))/10*[-1 1])
-        datetick('x','keepticks','keeplimits')
-        ylabel(field,'interpreter','none')
-        title('Climatological Test')
-        legend(s,{'Pass','Not Evaluated','Suspect','Suspect Threshold'})
-        set(gcf,'windowstyle','docked')
-    case 'spike'
-        for k=1:dbd.numProfiles
-            proData=data(dbd.profileInds(k,1):dbd.profileInds(k,2),:);
-            ind=find(~isnan(proData(:,3)));
-            proData=proData(ind,:);
-            proDir=diff(proData(:,2))./diff(proData(:,1));
-            proDir=mode(proDir./abs(proDir));
-            ind2=find(proData(:,4)==2);
-            ind3=find(proData(:,4)==3);
-            ind4=find(proData(:,4)==4);
-            if(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'1 second'))
-                proData(2:end,end+1)=diff(proData(:,3))./(diff(proData(:,1))*24*60*60);
-            elseif(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'sensor resolution'))
-                proData(2:end,end+1)=diff(proData(:,3));
-            end
+if(~xseconly)
+    switch test
+        case 'gross_range'
             figure
-            subplot(1,4,1)
-            xc=3;
-            yc=2;
-            plot(proData(:,xc),proData(:,yc),'b','marker','.')
-            set(gca,'ydir','reverse')
             hold on
-            s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
-                scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
-                scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
-            legend(s,{'N/A','Suspect','Fail'})
-            xlabel(field,'interpreter','none')
-            ylabel('Depth')
-            title('Spike Test')
-            xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
-            ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-            subplot(1,4,3)
-            xc=3;
-            yc=1;
-            plot(proData(:,xc),proData(:,yc),'b','marker','.')
-            if(proDir>0)
-                set(gca,'ydir','reverse')
-            end
+            s=[scatter([filldot;data(ind1,1)],[filldot;data(ind1,3)],'b','marker','.'),...
+                scatter([filldot;data(ind2,1)],[filldot;data(ind2,3)],'k.'),...
+                scatter([filldot;data(ind3,1)],[filldot;data(ind3,3)],'m.'),...
+                scatter([filldot;data(ind4,1)],[filldot;data(ind4,3)],'r.'),...
+                plot([min(data(:,1)) max(data(:,1))],...
+                dbd.scratch.thresholds.(field).(test).suspect(1)*[1 1],'m'),...
+                plot([min(data(:,1)) max(data(:,1))],...
+                dbd.scratch.thresholds.(field).(test).fail(1)*[1 1],'r')];
+            plot([min(data(:,1)) max(data(:,1))],...
+                dbd.scratch.thresholds.(field).(test).fail(2)*[1 1],'r');
+            plot([min(data(:,1)) max(data(:,1))],...
+                dbd.scratch.thresholds.(field).(test).suspect(2)*[1 1],'m');
+            xlabel('Time')
+            xlim([min(data(:,1)) max(data(:,1))]+range(data(:,1))/10*[-1 1])
+            ylim([min([data(:,3);dbd.scratch.thresholds.(field).(test).fail']) max([data(:,3);dbd.scratch.thresholds.(field).(test).fail'])]+range(data(:,3))/10*[-1 1])
+            datetick('x','HH:MM','keepticks','keeplimits')
+            ylabel(field,'interpreter','none')
+            title('Gross Range Test')
+            legend(s,{'Pass','Not Evaluated','Suspect','Fail','Suspect Threshold','Fail Threshold'})
+            set(gcf,'windowstyle','docked')
+        case 'climatological'
+            figure
             hold on
-            s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
-                scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
-                scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
-            legend(s,{'N/A','Suspect','Fail'})
-            xlabel(field,'interpreter','none')
-            ylabel('Time')
-            xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
-            ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-            datetick('y','HH:MM','keepticks','keeplimits')
-            title('Spike Test')
-            if(size(proData,2)==5)
-                subplot(1,4,2)
-                xc=5;
+            s=[scatter([filldot;data(ind1,1)],[filldot;data(ind1,3)],'b','marker','.'),...
+                scatter([filldot;data(ind2,1)],[filldot;data(ind2,3)],'k.'),...
+                scatter([filldot;data(ind3,1)],[filldot;data(ind3,3)],'m.'),...
+                plot([min(data(:,1)) max(data(:,1))],...
+                dbd.scratch.thresholds.(field).(test).suspect(1)*[1 1],'m')];
+            plot([min(data(:,1)) max(data(:,1))],...
+                dbd.scratch.thresholds.(field).(test).suspect(2)*[1 1],'m');
+            xlabel('Time')
+            xlim([min(data(:,1)) max(data(:,1))]+range(data(:,1))/10*[-1 1])
+            ylim([min([data(:,3);dbd.scratch.thresholds.(field).(test).suspect']) max([data(:,3);dbd.scratch.thresholds.(field).(test).suspect'])]+range(data(:,3))/10*[-1 1])
+            datetick('x','keepticks','keeplimits')
+            ylabel(field,'interpreter','none')
+            title('Climatological Test')
+            legend(s,{'Pass','Not Evaluated','Suspect','Suspect Threshold'})
+            set(gcf,'windowstyle','docked')
+        case 'spike'
+            for k=1:dbd.numProfiles
+                proData=data(dbd.profileInds(k,1):dbd.profileInds(k,2),:);
+                ind=find(~isnan(proData(:,3)));
+                proData=proData(ind,:);
+                proDir=diff(proData(:,2))./diff(proData(:,1));
+                proDir=mode(proDir./abs(proDir));
+                ind2=find(proData(:,4)==2);
+                ind3=find(proData(:,4)==3);
+                ind4=find(proData(:,4)==4);
+                if(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'1 second'))
+                    proData(2:end,end+1)=diff(proData(:,3))./(diff(proData(:,1))*24*60*60);
+                elseif(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'sensor resolution'))
+                    proData(2:end,end+1)=diff(proData(:,3));
+                end
+                figure
+                subplot(1,4,1)
+                xc=3;
                 yc=2;
                 plot(proData(:,xc),proData(:,yc),'b','marker','.')
                 set(gca,'ydir','reverse')
@@ -218,22 +195,14 @@ switch test
                 s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
                     scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
                     scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
-                plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
-                plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
-                plot([1 1]*dbd.scratch.thresholds.(field).(test).fail,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'r');
-                plot([1 1]*-dbd.scratch.thresholds.(field).(test).fail,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'r');
                 legend(s,{'N/A','Suspect','Fail'})
-                xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                xlabel(field,'interpreter','none')
                 ylabel('Depth')
                 title('Spike Test')
-                xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).fail]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).fail])]+range(proData(:,xc))/10*[-1 1])
+                xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
                 ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-                subplot(1,4,4)
-                xc=5;
+                subplot(1,4,3)
+                xc=3;
                 yc=1;
                 plot(proData(:,xc),proData(:,yc),'b','marker','.')
                 if(proDir>0)
@@ -243,91 +212,97 @@ switch test
                 s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
                     scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
                     scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
-                plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
-                plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
-                plot([1 1]*dbd.scratch.thresholds.(field).(test).fail,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'r');
-                plot([1 1]*-dbd.scratch.thresholds.(field).(test).fail,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'r');
                 legend(s,{'N/A','Suspect','Fail'})
-                xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                xlabel(field,'interpreter','none')
                 ylabel('Time')
-                xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).fail]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).fail])]+range(proData(:,xc))/10*[-1 1])
+                xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
                 ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
                 datetick('y','HH:MM','keepticks','keeplimits')
                 title('Spike Test')
+                if(size(proData,2)==5)
+                    subplot(1,4,2)
+                    xc=5;
+                    yc=2;
+                    plot(proData(:,xc),proData(:,yc),'b','marker','.')
+                    set(gca,'ydir','reverse')
+                    hold on
+                    s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
+                        scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
+                        scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
+                    plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    plot([1 1]*dbd.scratch.thresholds.(field).(test).fail,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'r');
+                    plot([1 1]*-dbd.scratch.thresholds.(field).(test).fail,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'r');
+                    legend(s,{'N/A','Suspect','Fail'})
+                    xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                    ylabel('Depth')
+                    title('Spike Test')
+                    xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).fail]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).fail])]+range(proData(:,xc))/10*[-1 1])
+                    ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
+                    subplot(1,4,4)
+                    xc=5;
+                    yc=1;
+                    plot(proData(:,xc),proData(:,yc),'b','marker','.')
+                    if(proDir>0)
+                        set(gca,'ydir','reverse')
+                    end
+                    hold on
+                    s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
+                        scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
+                        scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
+                    plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    plot([1 1]*dbd.scratch.thresholds.(field).(test).fail,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'r');
+                    plot([1 1]*-dbd.scratch.thresholds.(field).(test).fail,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'r');
+                    legend(s,{'N/A','Suspect','Fail'})
+                    xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                    ylabel('Time')
+                    xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).fail]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).fail])]+range(proData(:,xc))/10*[-1 1])
+                    ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
+                    datetick('y','HH:MM','keepticks','keeplimits')
+                    title('Spike Test')
+                end
+                set(gcf,'windowstyle','docked')
             end
-            set(gcf,'windowstyle','docked')
-        end
-    case 'rate_of_change'
-        for k=1:dbd.numProfiles
-            proData=data(dbd.profileInds(k,1):dbd.profileInds(k,2),:);
-            ind=find(~isnan(proData(:,3)));
-            proData=proData(ind,:);
-            proDir=diff(proData(:,2))./diff(proData(:,1));
-            proDir=mode(proDir./abs(proDir));
-            ind2=find(proData(:,4)==2);
-            ind3=find(proData(:,4)==3);
-            if(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'1 second'))
-                proData(2:end,end+1)=diff(proData(:,3))./(diff(proData(:,1))*24*60*60);
-            elseif(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'sensor resolution'))
-                proData(2:end,end+1)=diff(proData(:,3));
-            end
-            figure
-            subplot(1,4,1)
-            xc=3;
-            yc=2;
-            plot(proData(:,xc),proData(:,yc),'b','marker','.')
-            set(gca,'ydir','reverse')
-            hold on
-            s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
-                scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled')];
-            legend(s,{'N/A','Suspect'})
-            xlabel(field,'interpreter','none')
-            ylabel('Depth')
-            title('ROC Test')
-            xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
-            ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-            subplot(1,4,3)
-            xc=3;
-            yc=1;
-            plot(proData(:,xc),proData(:,yc),'b','marker','.')
-            if(proDir>0)
-                set(gca,'ydir','reverse')
-            end
-            hold on
-            s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
-                scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled')];
-            legend(s,{'N/A','Suspect'})
-            xlabel(field,'interpreter','none')
-            ylabel('Time')
-            xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
-            ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-            datetick('y','HH:MM','keepticks','keeplimits')
-            title('ROC Test')
-            if(size(proData,2)==5)
-                subplot(1,4,2)
-                xc=5;
+        case 'rate_of_change'
+            for k=1:dbd.numProfiles
+                proData=data(dbd.profileInds(k,1):dbd.profileInds(k,2),:);
+                ind=find(~isnan(proData(:,3)));
+                proData=proData(ind,:);
+                proDir=diff(proData(:,2))./diff(proData(:,1));
+                proDir=mode(proDir./abs(proDir));
+                ind2=find(proData(:,4)==2);
+                ind3=find(proData(:,4)==3);
+                if(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'1 second'))
+                    proData(2:end,end+1)=diff(proData(:,3))./(diff(proData(:,1))*24*60*60);
+                elseif(strcmp(dbd.scratch.thresholds.(field).(test).threshold_timestep,'sensor resolution'))
+                    proData(2:end,end+1)=diff(proData(:,3));
+                end
+                figure
+                subplot(1,4,1)
+                xc=3;
                 yc=2;
                 plot(proData(:,xc),proData(:,yc),'b','marker','.')
                 set(gca,'ydir','reverse')
                 hold on
                 s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
                     scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled')];
-                plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
-                plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
                 legend(s,{'N/A','Suspect'})
-                xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                xlabel(field,'interpreter','none')
                 ylabel('Depth')
                 title('ROC Test')
-                xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).suspect]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).suspect])]+range(proData(:,xc))/10*[-1 1])
+                xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
                 ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-                subplot(1,4,4)
-                xc=5;
+                subplot(1,4,3)
+                xc=3;
                 yc=1;
                 plot(proData(:,xc),proData(:,yc),'b','marker','.')
                 if(proDir>0)
@@ -336,69 +311,106 @@ switch test
                 hold on
                 s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
                     scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled')];
-                plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
-                plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
-                    [min(proData(:,yc)) max(proData(:,yc))],'m');
                 legend(s,{'N/A','Suspect'})
-                xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                xlabel(field,'interpreter','none')
                 ylabel('Time')
-                xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).suspect]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).suspect])]+range(proData(:,xc))/10*[-1 1])
+                xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
                 ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
                 datetick('y','HH:MM','keepticks','keeplimits')
                 title('ROC Test')
+                if(size(proData,2)==5)
+                    subplot(1,4,2)
+                    xc=5;
+                    yc=2;
+                    plot(proData(:,xc),proData(:,yc),'b','marker','.')
+                    set(gca,'ydir','reverse')
+                    hold on
+                    s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
+                        scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled')];
+                    plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    legend(s,{'N/A','Suspect'})
+                    xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                    ylabel('Depth')
+                    title('ROC Test')
+                    xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).suspect]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).suspect])]+range(proData(:,xc))/10*[-1 1])
+                    ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
+                    subplot(1,4,4)
+                    xc=5;
+                    yc=1;
+                    plot(proData(:,xc),proData(:,yc),'b','marker','.')
+                    if(proDir>0)
+                        set(gca,'ydir','reverse')
+                    end
+                    hold on
+                    s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
+                        scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled')];
+                    plot([1 1]*dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    plot([1 1]*-dbd.scratch.thresholds.(field).(test).suspect,...
+                        [min(proData(:,yc)) max(proData(:,yc))],'m');
+                    legend(s,{'N/A','Suspect'})
+                    xlabel({field;['diff per ' dbd.scratch.thresholds.(field).(test).threshold_timestep]},'interpreter','none')
+                    ylabel('Time')
+                    xlim([min([proData(:,xc);-dbd.scratch.thresholds.(field).(test).suspect]) max([proData(:,xc);dbd.scratch.thresholds.(field).(test).suspect])]+range(proData(:,xc))/10*[-1 1])
+                    ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
+                    datetick('y','HH:MM','keepticks','keeplimits')
+                    title('ROC Test')
+                end
+                set(gcf,'windowstyle','docked')
             end
-            set(gcf,'windowstyle','docked')
-        end
-    case 'flat_line'
-        for k=1:dbd.numProfiles
-            proData=data(dbd.profileInds(k,1):dbd.profileInds(k,2),:);
-            ind=find(~isnan(proData(:,3)));
-            proData=proData(ind,:);
-            proDir=diff(proData(:,2))./diff(proData(:,1));
-            proDir=mode(proDir./abs(proDir));
-            ind2=find(proData(:,4)==2);
-            ind3=find(proData(:,4)==3);
-            ind4=find(proData(:,4)==4);
-            figure
-            subplot(1,2,1)
-            xc=3;
-            yc=2;
-            plot(proData(:,xc),proData(:,yc),'b','marker','.')
-            set(gca,'ydir','reverse')
-            hold on
-            s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
-                scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
-                scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
-            legend(s,{'N/A','Suspect','Fail'})
-            xlabel(field,'interpreter','none')
-            ylabel('Depth')
-            title({'Flat Line Test';['eps=' num2str(dbd.scratch.thresholds.(field).(test).flat_line_range)];...
-                ['suspect_ct=' int2str(dbd.scratch.thresholds.(field).(test).suspect_count),...
-                '; fail_ct=' int2str(dbd.scratch.thresholds.(field).(test).fail_count)]},'interpreter','none')
-            xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
-            ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-            subplot(1,2,2)
-            xc=3;
-            yc=1;
-            plot(proData(:,xc),proData(:,yc),'b','marker','.')
-            if(proDir>0)
+        case 'flat_line'
+            for k=1:dbd.numProfiles
+                proData=data(dbd.profileInds(k,1):dbd.profileInds(k,2),:);
+                ind=find(~isnan(proData(:,3)));
+                proData=proData(ind,:);
+                proDir=diff(proData(:,2))./diff(proData(:,1));
+                proDir=mode(proDir./abs(proDir));
+                ind2=find(proData(:,4)==2);
+                ind3=find(proData(:,4)==3);
+                ind4=find(proData(:,4)==4);
+                figure
+                subplot(1,2,1)
+                xc=3;
+                yc=2;
+                plot(proData(:,xc),proData(:,yc),'b','marker','.')
                 set(gca,'ydir','reverse')
+                hold on
+                s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
+                    scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
+                    scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
+                legend(s,{'N/A','Suspect','Fail'})
+                xlabel(field,'interpreter','none')
+                ylabel('Depth')
+                title({'Flat Line Test';['eps=' num2str(dbd.scratch.thresholds.(field).(test).flat_line_range)];...
+                    ['suspect_ct=' int2str(dbd.scratch.thresholds.(field).(test).suspect_count),...
+                    '; fail_ct=' int2str(dbd.scratch.thresholds.(field).(test).fail_count)]},'interpreter','none')
+                xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
+                ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
+                subplot(1,2,2)
+                xc=3;
+                yc=1;
+                plot(proData(:,xc),proData(:,yc),'b','marker','.')
+                if(proDir>0)
+                    set(gca,'ydir','reverse')
+                end
+                hold on
+                s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
+                    scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
+                    scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
+                legend(s,{'N/A','Suspect','Fail'})
+                xlabel(field,'interpreter','none')
+                ylabel('Time')
+                xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
+                ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
+                datetick('y','HH:MM','keepticks','keeplimits')
+                title({'Flat Line Test';['eps=' num2str(dbd.scratch.thresholds.(field).(test).flat_line_range)];...
+                    ['suspect_ct=' int2str(dbd.scratch.thresholds.(field).(test).suspect_count),...
+                    '; fail_ct=' int2str(dbd.scratch.thresholds.(field).(test).fail_count)]},'interpreter','none')
+                set(gcf,'windowstyle','docked')
             end
-            hold on
-            s=[scatter([filldot;proData(ind2,xc)],[filldot;proData(ind2,yc)],'k','filled'),...
-                scatter([filldot;proData(ind3,xc)],[filldot;proData(ind3,yc)],'m','filled'),...
-                scatter([filldot;proData(ind4,xc)],[filldot;proData(ind4,yc)],'r','filled')];
-            legend(s,{'N/A','Suspect','Fail'})
-            xlabel(field,'interpreter','none')
-            ylabel('Time')
-            xlim([min(proData(:,xc)) max(proData(:,xc))]+range(proData(:,xc))/10*[-1 1])
-            ylim([min(proData(:,yc)) max(proData(:,yc))]+range(proData(:,yc))/10*[-1 1])
-            datetick('y','HH:MM','keepticks','keeplimits')
-            title({'Flat Line Test';['eps=' num2str(dbd.scratch.thresholds.(field).(test).flat_line_range)];...
-                ['suspect_ct=' int2str(dbd.scratch.thresholds.(field).(test).suspect_count),...
-                '; fail_ct=' int2str(dbd.scratch.thresholds.(field).(test).fail_count)]},'interpreter','none')
-            set(gcf,'windowstyle','docked')
-        end
+    end
 end
 
