@@ -32,6 +32,14 @@ function [clim_minsuspect,clim_maxsuspect,spike_thres,spike_fail,roc_thres,depth
 %         'newdbds': array of indices of dbd segments in need of QC
 %         'depthcategories': specific depth ranges to get thresholds for,
 %             if different from depth ranges in excel file
+%         'allowglobal': if given region/time period does not have an
+%             associated threshold, look for global threshold in same file
+%             (default: true)
+%         'allowdataestimate': if no file is provided or if file is
+%             invalid, or if given region/time period does not have an
+%             associated threshold AND there is no global threshold for the
+%             variable, estimate thresholds based on other data in dgroup
+%             (default: false)
 
 
 caller = [mfilename '.m'];
@@ -70,6 +78,8 @@ depthvarying=false;
 filedepth=true;
 newdbds=[];
 depthcats=[0 20;20 40;40 60;60 100;100 200;200 1000];
+allowglobal=true;
+allowdataestimate=false;
 
 if(iscell(varargin)&length(varargin)==1)
     varargin=varargin{1};
@@ -79,6 +89,18 @@ for x=1:2:length(varargin)
     name=varargin{x};
     value=varargin{x+1};
     switch lower(name)
+        case 'allowglobal'
+            if(~islogical(value))
+                warning('%s E: Value for %s must be logical. Ignoring...\n',caller,name);
+            else
+                allowglobal=value;
+            end
+        case 'allowdataestimate'
+            if(~islogical(value))
+                warning('%s E: Value for %s must be logical. Ignoring...\n',caller,name);
+            else
+                allowdataestimate=value;
+            end
         case 'region'
             if(~ischar(value))
                 warning('%s E: Value for %s must be a string. Ignoring...\n',caller,name);
@@ -135,10 +157,10 @@ for x=1:2:length(varargin)
     end
 end
 
-torig=dgroup.timestampSensors;
-dorig=dgroup.depthSensors;
-dgroup.timestampSensors='drv_sci_m_present_time_datenum';
-dgroup.depthSensors='drv_sci_water_pressure';
+%torig=dgroup.timestampSensors;
+%dorig=dgroup.depthSensors;
+%dgroup.timestampSensors='drv_sci_m_present_time_datenum';
+%dgroup.depthSensors='drv_sci_water_pressure';
 
 if(isempty(newdbds))
     [dataloc,~]=toArray(dgroup,'sensors',{'drv_longitude','drv_latitude'});
@@ -162,18 +184,34 @@ end
 
 if(strcmpi(method,'file'))
     if(~ischar(file))
+        if(~allowdataestimate)
+            fprintf(2,'%s E: Value for %s must be a valid file name string. Exiting...\n',caller,name);
+            return;
+        end
         warning('%s E: Value for %s must be a valid file name string. Using earlier data to estimate thresholds...\n',caller,name);
         method='earlierdata';
     elseif(~exist(file,'file'))
-        warning('%s E: File not found. Using earlier data to estimate thresholds...\n',caller,name);
+        if(~allowdataestimate)
+            fprintf(2,'%s E: File %s not found. Exiting...\n',caller,name);
+            return;
+        end
+        warning('%s E: File %s not found. Using earlier data to estimate thresholds...\n',caller,name);
         method='earlierdata';
     else
         indext=find(file=='.');
         if(isempty(indext))
+            if(~allowdataestimate)
+                fprintf(2,'%s E: Value for %s must be a valid file name. Exiting...\n',caller,name);
+                return;
+            end
             warning('%s E: Value for %s must be a valid file name. Using earlier data to estimate thresholds...\n',caller,name);
             method='earlierdata';
         else
             if(~strcmpi(file(indext(end)+1:indext(end)+3),'xls'))
+                if(~allowdataestimate)
+                    fprintf(2,'%s E: %s must be an Excel spreadsheet. Exiting...\n',caller,name);
+                    return;
+                end
                 warning('%s E: %s must be an Excel spreadsheet. Using earlier data to estimate thresholds...\n',caller,name);
                 method='earlierdata';
             end
@@ -190,6 +228,10 @@ if(strcmpi(method,'file'))
     if(length(sheets)==1)
         [~,~,limits]=xlsread(file);
     elseif(~ismember('limits',sheets))
+        if(~allowdataestimate)
+            fprintf(2,'%s E: Worksheet ''limits'' not found in file %s. Exiting...\n.',caller,file);
+            return;
+        end
         warning('%s E: Worksheet ''limits'' not found in file %s. Using earlier data to estimate thresholds...\n.',caller,file);
         method='earlierdata';
     else
@@ -198,6 +240,9 @@ if(strcmpi(method,'file'))
     limits(strcmpi(limits,''))={'nan'};
 end
 
+tryagain=true;
+while(tryagain)
+tryagain=false;
 if(strcmpi(method,'file'))
     regioncol=find(strcmpi('region',lower(limits(1,:))));
     if(isempty(regioncol))
@@ -205,8 +250,17 @@ if(strcmpi(method,'file'))
     else
         if(isempty(region))
             if(~exist('regional_defined_boundaries.txt','file'))
-                warning('%s E: No region supplied and file ''regional_defined_boundaries.txt'' listing regions with defined boundaries not in path. Using earlier data to estimate thresholds...\n',caller);
-                method='earlierdata';
+                if(allowglobal)
+                    warning('%s E: No region supplied and file ''regional_defined_boundaries.txt'' listing regions with defined boundaries not in path. Checking for global thresholds...\n',caller);
+                    region='global';
+                    tryagain=true; continue;
+                elseif(allowdataestimate)
+                    warning('%s E: No region supplied and file ''regional_defined_boundaries.txt'' listing regions with defined boundaries not in path. Using earlier data to estimate thresholds...\n',caller);
+                    method='earlierdata';
+                else
+                    fprintf(2,'%s E: No region supplied and file ''regional_defined_boundaries.txt'' listing regions with defined boundaries not in path. Exiting...\n',caller);
+                	return;
+                end
             else
                 fid=fopen('regional_defined_boundaries.txt');
                 region_options=textscan(fid,'%s','delimiter',',');
@@ -237,13 +291,31 @@ if(strcmpi(method,'file'))
                     n=n+1;
                 end
                 if(isempty(region))
-                    warning('%s E: No region found for lon=%f, lat=%f. Using earlier data to estimate thresholds...\n',caller,meanlon,meanlat);
-                    method='earlierdata';
+                    if(allowglobal)
+                        warning('%s E: No region found for lon=%f, lat=%f. Checking for global thresholds...\n',caller,meanlon,meanlat);
+                        region='global';
+                        tryagain=true; continue;
+                    elseif(allowdataestimate)
+                        warning('%s E: No region found for lon=%f, lat=%f. Using earlier data to estimate thresholds...\n',caller,meanlon,meanlat);
+                        method='earlierdata';
+                    else
+                        fprintf(2,'%s E: No region found for lon=%f, lat=%f. Exiting...\n',caller,meanlon,meanlat);
+                        return;
+                    end
                 else
                     indregion=strcmpi(region,limits(:,regioncol));
                     if(isempty(indregion))
-                        warning('%s E: Region %s not found in file %s. Using earlier data to estimate thresholds...\n',caller,region,file);
-                        method='earlierdata';
+                        if(allowglobal&~strcmp(region,'global'))
+                            warning('%s E: Region %s not found in file %s. Checking for global thresholds...\n',caller,region,file);
+                            region='global';
+                            tryagain=true; continue;
+                        elseif(allowdataestimate)
+                            warning('%s E: Region %s not found in file %s. Using earlier data to estimate thresholds...\n',caller,region,file);
+                            method='earlierdata';
+                        else
+                            fprintf(2,'%s E: Region %s not found in file %s. Exiting...\n',caller,region,file);
+                            return;
+                        end
                     else
                         indregion(1)=true;
                         limits=limits(indregion,:);
@@ -276,8 +348,17 @@ if(strcmpi(method,'file'))
         end
     end
     if(isempty(fieldname))
-        warning('%s E: Nothing matching field %s found in file %s. Using earlier data to estimate thresholds...\n',caller,field,file);
-        method='earlierdata';
+        if(allowglobal&~strcmp(region,'global'))
+            warning('%s E: Nothing matching field %s found in file %s. Checking for global thresholds...\n',caller,field,file);
+            region='global';
+            tryagain=true; continue;
+        elseif(allowdataestimate)
+            warning('%s E: Nothing matching field %s found in file %s. Using earlier data to estimate thresholds...\n',caller,field,file);
+            method='earlierdata';
+        else
+            fprintf(2,'%s E: Nothing matching field %s found in file %s. Exiting...\n',caller,field,file);
+            return;
+        end
     end
 end
 
@@ -289,16 +370,34 @@ if(strcmpi(method,'file'))
         fieldunits=unique(lower(limits(fieldind,unitcol)));
         if(strcmpi(lower(dgroup.sensorUnits.(field)),'nodim')|isempty(dgroup.sensorUnits.(field)))
             if(length(fieldunits)>1)
-                warning('%s E: No unit defined for %s and multiple units included in %s. Using earlier data to estimate thresholds...\n',caller,field,file);
-                method='earlierdata';
+                if(allowglobal&~strcmp(region,'global'))
+                    warning('%s E: No unit defined for %s and multiple units included in %s. Checking for global thresholds...\n',caller,field,file);
+                    region='global';
+                    tryagain=true; continue;
+                elseif(allowdataestimate)
+                    warning('%s E: No unit defined for %s and multiple units included in %s. Using earlier data to estimate thresholds...\n',caller,field,file);
+                    method='earlierdata';
+                else
+                    fprintf(2,'%s E: No unit defined for %s and multiple units included in %s. Exiting...\n',caller,field,file);
+                    return;
+                end
             else
                 unitname=fieldunits{1};
             end
         elseif(ismember(lower(dgroup.sensorUnits.(field)),fieldunits))
             unitname=lower(dgroup.sensorsUnits.(field));
         else
-            warning('%s E: No unit matching %s for field %s in file %s. Using earlier data to estimate thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
-            method='earlierdata';
+            if(allowglobal&~strcmp(region,'global'))
+                warning('%s E: No unit matching %s for field %s in file %s. Checking for global thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
+                region='global';
+                tryagain=true; continue;
+            elseif(allowdataestimate)
+                warning('%s E: No unit matching %s for field %s in file %s. Using earlier data to estimate thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
+                method='earlierdata';
+            else
+                fprintf(2,'%s E: No unit matching %s for field %s in file %s. Exiting...\n',caller,dgroup.sensorUnits.(field),field,file);
+                return;
+            end
         end
     else
         [~,~,unitnames]=xlsread(file,'unit_conversion');
@@ -311,8 +410,17 @@ if(strcmpi(method,'file'))
         if(isempty(dgroup.sensorUnits.(field))|strcmpi(dgroup.sensorUnits.(field),'nodim'))
             allunits=unique(lower(unitnames(fieldind,tocol)));
             if(length(allunits)>1)
-                warning('%s E: No unit defined for %s and multiple units included in %s. Using earlier data to estimate thresholds...\n',caller,field,file);
-                method='earlierdata';
+                if(allowglobal&~strcmp(region,'global'))
+                    warning('%s E: No unit defined for %s and multiple units included in %s. Checking for global thresholds...\n',caller,field,file);
+                    region='global';
+                    tryagain=true; continue;
+                elseif(allowdataestimate)
+                    warning('%s E: No unit defined for %s and multiple units included in %s. Using earlier data to estimate thresholds...\n',caller,field,file);
+                    method='earlierdata';
+                else
+                    fprintf(2,'%s E: No unit defined for %s and multiple units included in %s. Exiting...\n',caller,field,file);
+                    return;
+                end
             else
                 unitname=allunits{1};
             end
@@ -320,11 +428,29 @@ if(strcmpi(method,'file'))
             unitind=strcmpi(dgroup.sensorUnits.(field),unitnames(:,fromcol));
             unitind=find(fieldind&unitind);
             if(length(unitind)>1)
-                warning('%s E: Multiple unit conversions from %s for %s in %s. Using earlier data to estimate thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
-                method='earlierdata';
+                if(allowglobal&~strcmp(region,'global'))
+                    warning('%s E: Multiple unit conversions from %s for %s in %s. Checking for global thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
+                    region='global';
+                    tryagain=true; continue;
+                elseif(allowdataestimate)
+                    warning('%s E: Multiple unit conversions from %s for %s in %s. Using earlier data to estimate thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
+                    method='earlierdata';
+                else
+                    fprintf(2,'%s E: Multiple unit conversions from %s for %s in %s. Exiting...\n',caller,dgroup.sensorUnits.(field),field,file);
+                    return;
+                end
             elseif(isempty(unitind))
-                warning('%s E: No unit conversion from %s for %s in %s. Using earlier data to estimate thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
-                method='earlierdata';
+                if(allowglobal&~strcmp(region,'global'))
+                    warning('%s E: No unit conversion from %s for %s in %s. Checking for global thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
+                    region='global';
+                    tryagain=true; continue;
+                elseif(allowdataestimate)
+                    warning('%s E: No unit conversion from %s for %s in %s. Using earlier data to estimate thresholds...\n',caller,dgroup.sensorUnits.(field),field,file);
+                    method='earlierdata';
+                else
+                    fprintf(2,'%s E: No unit conversion from %s for %s in %s. Exiting...\n',caller,dgroup.sensorUnits.(field),field,file);
+                    return;
+                end
             else
                 unitname=lower(unitnames{unitind,tocol});
                 unitconversion=unitnames{unitind,convcol};
@@ -358,8 +484,17 @@ if(strcmpi(method,'file'))
         end
     end
     if(length(ind)==1)
-        warning('%s E: No thresholds found for current time period in file %s. Using earlier data to estimate thresholds...\n',caller,file);
-        method='earlierdata';
+        if(allowglobal&~strcmp(region,'global'))
+            warning('%s E: No thresholds found for current time period in file %s. Checking for global thresholds...\n',caller,file);
+            region='global';
+            tryagain=true; continue;
+        elseif(allowdataestimate)
+            warning('%s E: No thresholds found for current time period in file %s. Using earlier data to estimate thresholds...\n',caller,file);
+            method='earlierdata';
+        else
+            fprintf(2,'%s E: No thresholds found for current time period in file %s. Exiting...\n',caller,file);
+            return;
+        end
     else
         limits=limits(ind,:);
     end
@@ -399,12 +534,22 @@ if(strcmpi(method,'file'))
     checkthres=[fileclim_minsuspect;fileclim_maxsuspect;filespike_thres;...
         filespike_fail;fileroc_thres];
     if(isnan(nanmean(checkthres(:))))
-        warning('%s E: No thresholds found for field %s at time %s in file %s. Using earlier data to estimate thresholds...\n',caller,field,datestr(meantime,'mmm dd yyyy'),file);
-        method='earlierdata';
+        if(allowglobal&~strcmp(region,'global'))
+            warning('%s E: No thresholds found for field %s at time %s in file %s. Checking for global thresholds...\n',caller,field,datestr(meantime,'mmm dd yyyy'),file);
+            region='global';
+            tryagain=true; continue;
+        elseif(allowdataestimate)
+            warning('%s E: No thresholds found for field %s at time %s in file %s. Using earlier data to estimate thresholds...\n',caller,field,datestr(meantime,'mmm dd yyyy'),file);
+            method='earlierdata';
+        else
+            fprintf(2,'%s E: No thresholds found for field %s at time %s in file %s. Exiting...\n',caller,field,datestr(meantime,'mmm dd yyyy'),file);
+            return;
+        end
     elseif((isempty(filedepthcats)|isnan(nanmean(filedepthcats)))&depthvarying)
         warning('%s E: No depth categories for field %s at time %s in file %s. Ignoring depth variability...',caller,field,datestr(meantime,'mmm dd yyyy'),file);
         depthvarying=false;
     end
+end
 end
 
 if(strcmpi(method,'file'))
@@ -534,5 +679,5 @@ if(strcmpi(method,'earlierdata'))
 end
 
 
-dgroup.timestampSensors=torig;
-dgroup.depthSensors=dorig;
+%dgroup.timestampSensors=torig;
+%dgroup.depthSensors=dorig;
